@@ -1,0 +1,37 @@
+# ============ Python ============
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# ============ 虚拟环境 ============
+env/
+venv/
+.venv/
+
+# ============ 本机运行产物 / 参数缓存 ============
+# 注意：altium_tools_config.json 是【默认参数】，要进版本库；
+#      本机实际用过的状态请在此另存（如 altium_tools_config.local.json）
+*.local.json
+*.log
+
+# ============ 备份文件（改源前备份用，不入库）============
+*.bak_*
+*.bak
+*~
+_*.py
+_tmp*/
+
+# ============ 绝不能上传的凭据 ============
+.gh_token
+*.token
+.env
+
+# ============ 编辑器 / 系统 ============
+.workbuddy/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.lnk
