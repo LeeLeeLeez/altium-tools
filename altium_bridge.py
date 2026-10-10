@@ -232,6 +232,20 @@ class AltiumBridge:
         self.close()
 
     # -- 文档 ---------------------------------------------------------
+    # ------------------------------------------------------------ 通用透传
+    def tool(self, name: str, arguments: dict | None = None) -> dict:
+        """直接调用任意 eda-agent 工具（本文件没包成语义方法的那些）。"""
+        return self._mcp.tool(name, arguments or {})
+
+    def layer_stackup(self) -> dict:
+        """读当前 PCB 的真实叠层：按 order 排列的各层（含层名与铜厚）。
+
+        返回 {'layers': [{'name','order','copper_thickness_mils',
+                          'dielectric_type','dielectric_height_mils',
+                          'dielectric_constant'}, ...], 'layer_count', 'board_name'}
+        """
+        return self._mcp.tool("pcb_get_layer_stackup", {})
+
     def active_document(self) -> dict:
         return self._mcp.tool("app_get_active_document", {})
 

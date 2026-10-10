@@ -17,7 +17,9 @@ AltiumTools.spec —— PyInstaller 打包配置（Altium 工具集 GUI）
 
 import os
 
-HERE = os.path.abspath(os.path.dirname(SPECPATH))
+# SPECPATH 就是**本 spec 所在目录**（实测 E://AI_model//800_6_VPDB//gui//altium_tools）。/n# 原来写成 dirname(SPECPATH) 会落到上一级 gui\ —— 于是 altium_tools_config.json
+# 与 altium_tools.ico 全被判为"不存在"而**静默跳过**（图标因此没进包、运行时退默认图标）。
+HERE = os.path.abspath(globals().get("SPECPATH") or os.getcwd())
 
 hidden = [
     "gui_style",
@@ -30,12 +32,23 @@ hidden = [
     "stackup_file",
     "swap_page",
     "swap_script",
+    "overwrite_page",
+    "overwrite_script",
 ]
 
 datas = []
 _cfg = os.path.join(HERE, "altium_tools_config.json")
 if os.path.isfile(_cfg):
     datas.append((_cfg, "."))
+
+# 图标必须进 datas：onefile 会把它解到 sys._MEIPASS，运行时 gui_style.find_icon()
+# 才找得到（标题栏/窗口图标走这条路）。exe **自身**的图标另见下面 EXE(icon=...)，
+# 那一个决定 开始菜单 / 资源管理器 / 任务栏固定 显示什么。
+_ico = os.path.join(HERE, "altium_tools.ico")
+if os.path.isfile(_ico):
+    datas.append((_ico, "."))
+else:
+    print("!! warning: altium_tools.ico not found - run make_icon.py first")
 
 a = Analysis(
     ["main.py"],
@@ -71,4 +84,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon="altium_tools.ico",   # exe 内嵌图标 -> 开始菜单/资源管理器/任务栏
 )

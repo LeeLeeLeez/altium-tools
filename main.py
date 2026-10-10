@@ -35,6 +35,7 @@ import altium_bridge as ab
 import midpoint_tab as MT
 import stackup_page as SP
 import swap_page as SWP
+import overwrite_page as OWP
 
 CFG_PATH = os.path.join(_HERE, "altium_tools_config.json")
 
@@ -55,7 +56,8 @@ class App:
             self.cfg.setdefault(k, v)
 
         self.app = gs.init("Altium 工具集", size=(1180, 780),
-                           minsize=(960, 620), appid="WorkBuddy.AltiumTools")
+                           minsize=(960, 620), appid="WorkBuddy.AltiumTools",
+                           icon="altium_tools.ico")
         self.app.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._bridge: ab.AltiumBridge | None = None
@@ -93,6 +95,14 @@ class App:
         self.nav.add(self.pg_swap, text="层交换", icon="equalizer", group="PCB 操作")
         self.swp = SWP.SwapPage(self.pg_swap, self, self.stk, log_fn=self._log)
         self.swp.pack(fill="both", expand=True)
+
+        # 叠层覆盖：清空 A 层 -> 把 B 层内容复制到 A（B 保留）
+        self.pg_ow = ttk.Frame(self.nav.body)
+        self.nav.add(self.pg_ow, text="叠层覆盖", icon="save",
+                     group="PCB 操作")
+        self.owp = OWP.OverwritePage(self.pg_ow, self, self.stk,
+                                     log_fn=self._log)
+        self.owp.pack(fill="both", expand=True)
 
         self.nav.select(1)          # 默认停在「画中点短线」
 

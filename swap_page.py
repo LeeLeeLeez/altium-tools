@@ -93,6 +93,10 @@ class SwapPage(ttk.Frame):
         self.btn_gen = ttk.Button(btns, text="生成交换脚本", style="Accent.TButton",
                                   command=self.on_generate, state="disabled")
         self.btn_gen.pack(side="left")
+        self.btn_read = ttk.Button(self.btn_gen.master,
+                                   text="读取当前 PCB 叠层",
+                                   command=self.on_read_stack)
+        self.btn_read.pack(side="left", padx=(8, 0))
         ttk.Button(btns, text="打开脚本目录",
                    command=self.on_open_dir).pack(side="left", padx=(8, 0))
 
@@ -100,7 +104,7 @@ class SwapPage(ttk.Frame):
         note.pack(fill="x", pady=(10, 0))
         ttk.Label(note, justify="left", wraplength=460, style="Muted.TLabel",
                   text="1. 在 AD 里先只打开目标 .PcbDoc\n"
-                       "2. File → Run Script… → 选 swap_layers.PrjScr\n"
+                       "2. File → Run Script… → 选刚生成的那个 .PrjScr\n"
                        "3. 过程名选 SwapLayers\n"
                        "4. 核对弹窗上的层名与数量，再按 OK\n"
                        "5. Ctrl+S 保存；不满意就 Ctrl+Z\n\n"
@@ -196,12 +200,82 @@ class SwapPage(ttk.Frame):
         self._say(f"   层 A {a} → {sa}\n   层 B {b} → {sb}\n"
                   f"   中转候选 {picks} 个（已自动跳过 A/B）\n"
                   f"   .pas {os.path.getsize(pas)} B，纯 ASCII / CRLF")
-        self._say("→ 下一步：AD 里 File → Run Script… → swap_layers.PrjScr → SwapLayers")
+        self._say(f"→ 下一步：AD 里 File → Run Script… → {os.path.basename(prj)} → SwapLayers")
         messagebox.showinfo("已生成",
                             f"已写出脚本：\n{pas}\n\n"
                             f"层 A：{a}  ({sa})\n层 B：{b}  ({sb})\n\n"
-                            f"请在 AD 里 File → Run Script… 选 swap_layers.PrjScr，\n"
+                            f"请在 AD 里 File → Run Script… 选 {os.path.basename(prj)}，\n"
                             f"过程名 SwapLayers。")
+
+    # ================================================================ 读板子叠层
+    def on_read_stack(self):
+        """读【当前 PCB】的真实叠层（各铜层 + 层名 + 铜厚），用它填 A/B 下拉。
+
+        为什么要读板子而不是只信叠层设计：
+          层名是叠层设计重命名过的，名字里的数字 **不等于** 栈内位置，
+          也不等于 AD 的 MidLayer 序号。只有读板子才知道哪个名字对应哪一层。
+        """
+        try:
+            self.btn_read.configure(state="disabled")
+        except Exception:
+            pass
+        self.app.set_status("读取 PCB 叠层 …")
+        try:
+            br = self.app.bridge()
+            r = br.layer_stackup()
+        except Exception as e:                      # noqa: BLE001
+            self.btn_read.configure(state="normal")
+            self.app.set_status("读取叠层失败")
+            self._say(f"❌ 读取叠层失败：{type(e).__name__}: {e}")
+            messagebox.showerror(
+                "读取叠层失败",
+                f"{type(e).__name__}: {e}\n\n"
+                "请确认 AD 已打开电路板（.PcbDoc）并处于活动状态，"
+                "且桥接轮询在运行。")
+            return
+        self.btn_read.configure(state="normal")
+
+        if isinstance(r, dict) and r.get("_error"):
+            self._say(f"❌ 桥接返回错误：{r['_error']}")
+            return
+        rows = (r or {}).get("layers") or []
+        if not rows:
+            self._say("❌ 板子没返回叠层信息（可能没有打开 .PcbDoc）")
+            return
+
+        # 只取铜层（介质层 copper_thickness_mils = 0），按 order 排
+        copper = [x for x in rows
+                  if float(x.get("copper_thickness_mils") or 0) > 0]
+        copper.sort(key=lambda x: int(x.get("order") or 0))
+        names = [str(x.get("name") or "") for x in copper]
+        self.stack_names = names
+        self.stack_rows = copper
+
+        self.cb_a.configure(values=names, state="readonly")
+        self.cb_b.configure(values=names, state="readonly")
+        self.btn_gen.configure(state="normal")
+
+        board = (r or {}).get("board_name") or "(未知板)"
+        self.lbl_state.configure(
+            text=f"来源：**当前 PCB 实测** —— {board}，共 {len(names)} 个铜层")
+
+        self._say(f"✅ 已读取当前 PCB 叠层：{board}")
+        self._say(f"   共 {len(rows)} 层，其中铜层 {len(copper)} 个：")
+        for i, x in enumerate(copper):
+            self._say("     %2d. %-10s 铜厚 %.4f mil"
+                      % (i + 1, x.get("name"), float(x.get("copper_thickness_mils") or 0)))
+
+        # 当前 A/B 若不在板子上，明确警告（之前的错就出在这里）
+        bad = [n for n in (self.v_a.get(), self.v_b.get()) if n and n not in names]
+        if bad:
+            self._say("   ⚠️ 当前选中的 %s 不在本板叠层里 —— 已改为板上的名字"
+                      % "、".join(bad))
+        if self.v_a.get() not in names:
+            self.v_a.set(names[0])
+        if self.v_b.get() not in names or self.v_b.get() == self.v_a.get():
+            self.v_b.set(names[1] if len(names) > 1 else names[0])
+        self._on_pick()
+        self.app.set_status("叠层已读取")
 
     def on_open_dir(self):
         try:

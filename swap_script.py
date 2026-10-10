@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import time
 
 MAX_MID = 30            # AD 最多 MidLayer30
 
@@ -66,21 +68,27 @@ def _candidates(sym_a: str, sym_b: str) -> list[str]:
             if f"eMidLayer{i}" not in skip]
 
 
-def build_pas(name_a: str, name_b: str) -> str:
+def build_pas(name_a: str, name_b: str, stem: str = "") -> str:
     """生成交换脚本正文（纯 ASCII，CRLF 由调用方负责）。"""
     sa, sb = validate_pair(name_a, name_b)
     cands = _candidates(sa, sb)
     if not cands:
         raise LayerPickError("没有可用的中转候选层")
 
-    picks = "\n".join(f"    If TryPick({c}) Then Exit;" for c in cands)
+    # TryPick 声明为 (L : TLayer; Idx : Integer) —— 必须连 Idx 一起传，
+    # 否则 Altium 解析实参表时期望「逗号 + 第 2 个参数」，报 Comma expected。
+    # Idx 就是 MidLayer 序号，TryPick 内部用它写 BoxIdx（供报告显示容器层号）。
+    picks = "\n".join(
+        f"    If TryPick({c}, {c[len('eMidLayer'):]}) Then Exit;"
+        for c in cands)
 
     # 🔴 不能用 str.format：模板里满是用作 Pascal 注释的 { }，
     #    format 会把它们当占位符。用唯一的 @@TOKEN@@ 显式替换。
     out = _TEMPLATE
     for tok, val in (("@@NAME_A@@", name_a), ("@@NAME_B@@", name_b),
                      ("@@SYM_A@@", sa), ("@@SYM_B@@", sb),
-                     ("@@NPICK@@", str(len(cands))), ("@@PICKS@@", picks)):
+                     ("@@NPICK@@", str(len(cands))), ("@@PICKS@@", picks),
+                     ("@@STEM@@", stem or "swap_layers")):
         out = out.replace(tok, val)
     if "@@" in out:
         raise LayerPickError("模板里还有未替换的占位符: "
@@ -89,7 +97,7 @@ def build_pas(name_a: str, name_b: str) -> str:
 
 
 _TEMPLATE = r'''{-----------------------------------------------------------------------------}
-{ swap_layers.pas - Swap ALL primitives between two copper layers.             }
+{ @@STEM@@.pas - Swap ALL primitives between two copper layers.                 }
 {                                                                             }
 { GENERATED FILE - do not hand-edit.                                           }
 { Regenerate from the GUI (Altium Tools > layer swap tab).                     }
@@ -116,7 +124,7 @@ _TEMPLATE = r'''{---------------------------------------------------------------
 { start where it looks like it does, and a wrong number silently targets the   }
 { wrong layer.                                                                 }
 {                                                                             }
-{ Run: File > Run Script > swap_layers.PrjScr > SwapLayers                    }
+{ Run: File > Run Script > @@STEM@@.PrjScr > SwapLayers                        }
 {-----------------------------------------------------------------------------}
 
 Const
@@ -145,6 +153,8 @@ Var
     Moved3     : Integer;
     Leftover   : Integer;
     TmpStr     : String;
+    FoundA     : Boolean;
+    FoundB     : Boolean;
 
 {-----------------------------------------------------------------------------}
 { Primitive types that participate in the swap.                                }
@@ -391,6 +401,90 @@ End;
 {-----------------------------------------------------------------------------}
 { SwapLayers - entry point called from File > Run Script.                      }
 {-----------------------------------------------------------------------------}
+{-----------------------------------------------------------------------------}
+{ Write the report to a file next to the .PcbDoc.                            }
+{ The Try/Except blocks below swallow real errors, so the dialog used to be  }
+{ the only evidence - and it disappears when dismissed.                      }
+{-----------------------------------------------------------------------------}
+Procedure DumpReport(Txt : String);
+Var
+    SL : TStringList;
+Begin
+    Try
+        SL := TStringList.Create;
+        SL.Text := Txt;
+        SL.SaveToFile(ExtractFilePath(Board.FileName) + 'swap_layers_report.txt');
+        SL.Free;
+    Except
+    End;
+End;
+
+{-----------------------------------------------------------------------------}
+{ Resolve a layer by its DISPLAY NAME (what the user sees / picked in the GUI).}
+{                                                                            }
+{ Must NOT assume L(number) == eMidLayer(number): this board's layers are renamed by the }
+{ stackup design, so the name and the MidLayer index are unrelated.           }
+{ LayerObj.LayerID is the TLayer value.                                       }
+{-----------------------------------------------------------------------------}
+Function LayerByName(Nm : String; Var Ok : Boolean) : TLayer;
+Var
+    LayerStack : IPCB_LayerStack_V7;
+    LayerObj   : IPCB_LayerObject_V7;
+    LName      : String;
+Begin
+    Ok := False;
+    Result := eTopLayer;
+    If Board = Nil Then Exit;
+    LayerStack := Board.LayerStack_V7;
+    If LayerStack = Nil Then Exit;
+    LayerObj := LayerStack.FirstLayer;
+    While LayerObj <> Nil Do
+    Begin
+        Try LName := LayerObj.Name; Except LName := ''; End;
+        If LName = Nm Then
+        Begin
+            Try
+                Result := LayerObj.LayerID;
+                Ok := True;
+            Except
+                Ok := False;
+            End;
+            Exit;
+        End;
+        LayerObj := LayerStack.NextLayer(LayerObj);
+    End;
+End;
+
+{ All names in the stack, for a helpful error message. }
+Function StackLayerNames : String;
+Var
+    LayerStack : IPCB_LayerStack_V7;
+    LayerObj   : IPCB_LayerObject_V7;
+    LName, Acc : String;
+Begin
+    Acc := '';
+    If Board = Nil Then
+    Begin
+        Result := '(no board)';
+        Exit;
+    End;
+    LayerStack := Board.LayerStack_V7;
+    If LayerStack = Nil Then
+    Begin
+        Result := '(no layer stack)';
+        Exit;
+    End;
+    LayerObj := LayerStack.FirstLayer;
+    While LayerObj <> Nil Do
+    Begin
+        Try LName := LayerObj.Name; Except LName := '?'; End;
+        If Acc <> '' Then Acc := Acc + ', ';
+        Acc := Acc + LName;
+        LayerObj := LayerStack.NextLayer(LayerObj);
+    End;
+    Result := Acc;
+End;
+
 Procedure SwapLayers;
 Begin
     Board := PCBServer.GetCurrentPCBBoard;
@@ -401,8 +495,23 @@ Begin
         Exit;
     End;
 
-    LayerA := @@SYM_A@@;
-    LayerB := @@SYM_B@@;
+    { ---- resolve the two target layers BY NAME (never by index) ---- }
+    LayerA := LayerByName('@@NAME_A@@', FoundA);
+    If Not FoundA Then
+    Begin
+        ShowMessage('Aborted: no layer named ''@@NAME_A@@'' on this board.' + #13#10 +
+                    'The stack layers on this board:' + #13#10 +
+                    StackLayerNames);
+        Exit;
+    End;
+    LayerB := LayerByName('@@NAME_B@@', FoundB);
+    If Not FoundB Then
+    Begin
+        ShowMessage('Aborted: no layer named ''@@NAME_B@@'' on this board.' + #13#10 +
+                    'The stack layers on this board:' + #13#10 +
+                    StackLayerNames);
+        Exit;
+    End;
 
     { ---- 0. baseline ---------------------------------------------------- }
     CntAA    := CountOnLayer(LayerA);
@@ -449,6 +558,11 @@ Begin
     If CountOnLayer(BoxLayer) <> Moved1 Then
     Begin
         MoveLayer(BoxLayer, LayerA);         { put them back - leave no mess }
+        DumpReport('ABORTED at step 1. container=' + IntToStr(BoxIdx) +
+                   #13#10 + 'A=' + IntToStr(CntAA) +
+                   ' B=' + IntToStr(CntBA) +
+                   ' moved1=' + IntToStr(Moved1) +
+                   ' box_now=' + IntToStr(CountOnLayer(BoxLayer)));
         ShowMessage('Aborted during step 1: only ' +
                     IntToStr(CountOnLayer(BoxLayer)) + ' of ' + IntToStr(Moved1) +
                     ' primitives reached eMidLayer' + IntToStr(BoxIdx) + '.' +
@@ -474,7 +588,10 @@ Begin
 
     Board.ViewManager_FullUpdate;
 
-    TmpStr := 'Swap finished.' + #13#10 +
+    TmpStr := '*** NOT SAVED YET ***   Press Ctrl+S to keep the swap.' +
+              '(Closing the document without saving = the swap is lost.)' +
+              #13#10 + #13#10 +
+              'Swap finished.' + #13#10 +
               '------------------------------------------------' + #13#10 +
               'moved: A->box ' + IntToStr(Moved1) +
               ' | B->A ' + IntToStr(Moved2) +
@@ -504,25 +621,95 @@ Begin
                   ' primitives:' + #13#10 + LayerBreakdown(BoxLayer);
     End;
 
+    DumpReport(TmpStr);
     ShowMessage(TmpStr);
 End;
 '''
 
 PRJ = ("[Design]\r\nVersion=1.0\r\nHierarchyMode=0\r\n\r\n"
-       "[Document1]\r\nDocumentPath=swap_layers.pas\r\n")
+       "[Document1]\r\nDocumentPath=@@PASNAME@@\r\n")
 
 
-def write_script(out_dir: str, name_a: str, name_b: str) -> tuple[str, str]:
-    """生成 swap_layers.pas + swap_layers.PrjScr，返回两个路径。"""
+PRUNE_ERRORS = []      # 归档失败清单（不许静默）
+KEEP_SETS = 10          # 保留最近多少套时间戳脚本
+KEEP_BAKS = 20          # 保留多少个 *.bak_* 备份
+
+
+def prune_old(out_dir: str, keep_sets: int = 0, keep_baks: int = 0,
+              log=None) -> list:
+    """把过旧的套件/备份**移动**到 _old/（不删除），返回被移动的文件名列表。
+
+    只动两类东西：
+      - swap_layers_<时间戳>.pas / .PrjScr —— 按 stem 成对计，保留最近 keep_sets 套
+      - *.bak_*                            —— 保留最近 keep_baks 个
+    固定名的老文件（swap_layers.pas / swap_top_l1.*）不碰。
+    """
+    keep_sets = keep_sets or KEEP_SETS
+    keep_baks = keep_baks or KEEP_BAKS
+    moved = []
+    try:
+        names = os.listdir(out_dir)
+    except OSError:
+        return moved
+
+    # ---- 成套的时间戳脚本 ----
+    stems = sorted({m.group(1) for n in names
+                    for m in [re.fullmatch(r"(swap_layers_\d{8}_\d{6})\.(pas|PrjScr)", n)]
+                    if m})
+    victims = []
+    for stem in stems[:-keep_sets] if len(stems) > keep_sets else []:
+        for ext in (".pas", ".PrjScr"):
+            victims.append(stem + ext)
+
+    # ---- 备份文件 ----
+    baks = sorted((n for n in names if ".bak_" in n), key=lambda n: (
+        os.path.getmtime(os.path.join(out_dir, n)), n), reverse=True)
+    victims += baks[keep_baks:]
+
+    if not victims:
+        return moved
+    dest = os.path.join(out_dir, "_old")
+    os.makedirs(dest, exist_ok=True)
+    for n in victims:
+        src = os.path.join(out_dir, n)
+        if not os.path.isfile(src):
+            continue
+        tgt = os.path.join(dest, n)
+        if os.path.exists(tgt):
+            tgt = os.path.join(dest, "%s.%d" % (n, int(time.time())))
+        try:
+            shutil.move(src, tgt)
+            moved.append(n)
+        except Exception as e:      # 不再静默吞掉
+            PRUNE_ERRORS.append("%s: %s" % (n, e))
+    if log and moved:
+        log("   归档 %d 个旧文件 -> _old/" % len(moved))
+    return moved
+
+
+def default_stem() -> str:
+    """每次一套独立文件名（时间戳），互不覆盖 —— 避免 AD 用到旧脚本。"""
+    return "swap_layers_" + time.strftime("%Y%m%d_%H%M%S")
+
+
+def write_script(out_dir: str, name_a: str, name_b: str,
+                 stem: str = "") -> tuple[str, str]:
+    """生成 <stem>.pas + <stem>.PrjScr，返回两个路径。
+
+    stem 默认是带时间戳的 swap_layers_YYYYMMDD_HHMMSS；
+    调用方可显式传入（校验器就靠这个复现历史文件名）。"""
     os.makedirs(out_dir, exist_ok=True)
-    pas = os.path.join(out_dir, "swap_layers.pas")
-    prj = os.path.join(out_dir, "swap_layers.PrjScr")
-    body = build_pas(name_a, name_b)
+    if not stem:
+        stem = default_stem()
+    pas = os.path.join(out_dir, stem + ".pas")
+    prj = os.path.join(out_dir, stem + ".PrjScr")
+    body = build_pas(name_a, name_b, stem=stem)
     body = body.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
     with open(pas, "wb") as f:
         f.write(body.encode("ascii"))
     with open(prj, "wb") as f:
-        f.write(PRJ.encode("ascii"))
+        f.write(PRJ.replace("@@PASNAME@@", stem + ".pas").encode("ascii"))
+    prune_old(out_dir)          # 过旧的套件/备份归档到 _old/（移动，不删除）
     return pas, prj
 
 

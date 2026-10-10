@@ -65,6 +65,7 @@ __all__ = [
     "font", "card", "paned", "popup", "sidebar",
     "listbox_kw", "text_kw",
     "load_json_cfg", "save_json_cfg",
+    "find_icon",
 ]
 
 # ---------------------------------------------------------------- 调色板
@@ -136,6 +137,71 @@ def _set_taskbar_appid(appid: str = "WorkBuddy.GuiStyle.Tool") -> None:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(appid)
     except Exception:
         pass
+
+
+# 图标必须留引用，否则被 GC 掉、图标随即消失（iconphoto 路径才需要）
+_ICON_REFS: list = []
+
+
+def _res_dir() -> str:
+    """PyInstaller onefile 把 datas 解到 sys._MEIPASS。
+
+    注意 _MEIPASS **不等于** exe 所在目录 —— 只认 exe 目录时，把 exe 拷到
+    另一台机器（旁边没有 .ico）就会找不到图标，于是回退成 Tk/Python 默认图标。
+    """
+    return getattr(sys, "_MEIPASS",
+                   os.path.dirname(os.path.abspath(__file__)))
+
+
+def _exe_dir() -> str:
+    if getattr(sys, "frozen", False):
+        try:
+            return os.path.dirname(os.path.abspath(sys.executable))
+        except Exception:
+            pass
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def find_icon(name: str) -> str:
+    """按 打包内嵌 -> exe 同目录 -> 源码目录 找 .ico；找不到返回空串。"""
+    if not name:
+        return ""
+    dirs = [_res_dir(), _exe_dir(), os.path.dirname(os.path.abspath(__file__))]
+    seen = set()
+    for d in dirs:
+        if not d or d in seen:
+            continue
+        seen.add(d)
+        p = os.path.join(d, name)
+        try:
+            if os.path.isfile(p):
+                return p
+        except Exception:
+            continue
+    return ""
+
+
+def _set_window_icon(root: tk.Misc, name: str) -> str:
+    """设窗口/标题栏图标，返回实际用到的路径（便于自检）。
+
+    顺序铁律（踩过坑）：
+      * `iconbitmap(default=...)` 的 `default=` 会让**之后新建的 Toplevel**
+        继承同一图标，所以要用它而不是 `iconbitmap(path)`。
+      * 设完之后**不要再调 `iconphoto`** —— 它会覆盖 iconbitmap，把多尺寸
+        .ico 换掉。iconphoto 只作为"连 ico 都没有"时的兜底。
+      * 任务栏能不能用上自己的图标，靠的是 `_set_taskbar_appid()`（在建窗之前调）。
+    """
+    p = find_icon(name)
+    if not p:
+        return ""
+    try:
+        root.iconbitmap(default=p)
+    except Exception:
+        try:
+            root.iconbitmap(p)
+        except Exception:
+            return ""
+    return p
 
 
 def _pick_font_family(root: tk.Misc) -> str:
@@ -285,16 +351,25 @@ apply_theme = setup_style   # 别名：两个名字都能用
 
 # ---------------------------------------------------------------- 组合件
 def init(title: str = "工具", size: tuple = (1280, 860),
-         minsize: tuple = (900, 640), appid: str = None) -> tk.Tk:
-    """一行完成：高DPI → 建窗口 → 应用主题 → 设尺寸/底色/标题。
+         minsize: tuple = (900, 640), appid: str = None,
+         icon: str = None) -> tk.Tk:
+    """一行完成：高DPI → 建窗口 → 应用主题 → 设图标 → 设尺寸/底色/标题。
 
     必须在**任何**其它 tk 控件创建之前调用（高 DPI 感知有顺序要求）。
+
+    icon : 窗口/**标题栏**图标文件名（如 "altium_tools.ico"）。
+           打包后按 内嵌资源 -> exe 同目录 -> 源码目录 查找。
+           ⚠️ **开始菜单 / 资源管理器 / 任务栏固定**的图标来自 exe 自身的资源，
+           那由 PyInstaller spec 的 `EXE(..., icon="xxx.ico")` 决定，与本参数无关。
     """
     _set_taskbar_appid(appid or ("WorkBuddy." + title))
     s = enable_hidpi()
     root = tk.Tk()
     setup_style(root)
     root.title(title)
+    if icon:
+        # 存下来便于自检：windll 之外没法查 wm_iconbitmap()（对 .ico 恒返回空串）
+        root._wb_icon_path = _set_window_icon(root, icon)
     root.geometry("%dx%d" % (int(size[0] * s), int(size[1] * s)))
     root.minsize(int(minsize[0] * s), int(minsize[1] * s))
     root.resizable(True, True)

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -424,14 +425,34 @@ class StackupDesignPage(ttk.Frame):
         """参数变化 → 重建序列（保留已编辑的铜厚 / 类型，长度够的话）。"""
         self.rebuild(keep_edits=True)
 
-    def _on_cumode(self):
+    def _apply_cumode_state(self):
+        """按铜厚模式锁定「不该改」的那一侧。
+
+        按原副边(global)     ： 全局 原边/副边/GND 铜厚可改；逐层表的铜厚列锁定
+        逐层单独指定(perlayer)： 全局铜厚锁定；逐层表的铜厚列可改
+
+        按原副边时逐层铜厚是由 ozP/ozS/ozG 推导出来的，手改没有意义
+        （下一次 _recompute 就会覆盖掉），所以必须禁用。
+        """
         per = self.v_cumode.get() == "perlayer"
-        state = "disabled" if per else "readonly"
+        # (1) 全局铜厚输入：只有「按原副边」模式可改
         for w in self.f_cu.winfo_children():
             if isinstance(w, ttk.Combobox):
-                w.configure(state=state)
+                w.configure(state="readonly" if not per else "disabled")
+        # (2) 逐层表的铜厚列：只有「逐层单独指定」模式可改
+        for r in self._rows:
+            ob = r.get("oz")
+            try:
+                if ob is not None and ob.winfo_exists():
+                    ob.configure(state="readonly" if per else "disabled")
+            except tk.TclError:
+                pass
+
+    def _on_cumode(self):
+        per = self.v_cumode.get() == "perlayer"
+        self._apply_cumode_state()
         self._say("铜厚模式：" + ("逐层单独指定（下方逐层下拉生效）" if per
-                                else "按原副边（全局铜厚生效）"))
+                                else "按原副边（逐层铜厚由全局值推导，已锁定）"))
         self._recompute()
 
     # ================================================================ 重建序列
@@ -497,6 +518,7 @@ class StackupDesignPage(ttk.Frame):
             ttk.Label(rf, text=("—" if d is None else f"{d:g}"), width=11,
                       anchor="w", style="Muted.TLabel").pack(side="left", padx=(6, 0))
             self._rows.append(dict(type=cb, oz=ob))
+        self._apply_cumode_state()      # 重建后重新套用锁定状态（关键）
         self._draw_strip()
 
     def _on_type(self, idx, label):
@@ -776,14 +798,16 @@ class StackupDesignPage(ttk.Frame):
                                       f"再 File → Save to PCB 生效。")
 
     def _default_out_path(self) -> str:
+        """默认写出路径 —— 文件名一律带时间戳，避免覆盖上一版。"""
+        ts = time.strftime("%Y%m%d_%H%M%S")
         if self._src_file:
             base = os.path.splitext(os.path.basename(self._src_file))[0]
             return os.path.join(os.path.dirname(self._src_file),
-                                f"{base}_design.stackup")
+                                f"{base}_design_{ts}.stackup")
         d = r"E://AI_model//800_6_VPDB//stackup"
         if not os.path.isdir(d):
             d = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(d, "stackup_design.stackup")
+        return os.path.join(d, f"stackup_design_{ts}.stackup")
 
     # ================================================================ 配置
     def cfg_path(self) -> str:
@@ -804,10 +828,7 @@ class StackupDesignPage(ttk.Frame):
         self._on_cumode_quiet()
 
     def _on_cumode_quiet(self):
-        per = self.v_cumode.get() == "perlayer"
-        for w in self.f_cu.winfo_children():
-            if isinstance(w, ttk.Combobox):
-                w.configure(state="disabled" if per else "readonly")
+        self._apply_cumode_state()
 
     def save_cfg(self):
         # ⚠️ 与 main.py 的「画中点短线」页共用同一个 JSON ⇒ 必须**读-合并-写**，
