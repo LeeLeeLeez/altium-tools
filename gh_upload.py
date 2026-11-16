@@ -134,20 +134,66 @@ FILES = [
     "LICENSE",
     ".gitignore",
     "requirements.txt",
-    "main.py",
-    "gui_style.py",
-    "gui_sidebar.py",
+    # ---- 后端：本地 HTTP 服务 + 纯逻辑业务层 ----
+    "server.py",
+    "api/__init__.py",
+    "api/paths.py",
+    "api/config_store.py",
+    "api/bridge_service.py",
+    "api/midpoint_service.py",
+    "api/stackup_service.py",
+    "api/swap_service.py",
+    "api/overwrite_service.py",
+    "api/snapshot_service.py",
     "altium_bridge.py",
-    "midpoint_tab.py",
-    "stackup_page.py",
     "stackup_design.py",
     "stackup_build.py",
     "stackup_file.py",
-    "swap_page.py",
     "swap_script.py",
-    "overwrite_page.py",
     "overwrite_script.py",
+    "snapshot_core.py",
+    "connect_rule_script.py",
     "make_icon.py",
+    "make_tauri_icons.py",
+    # ---- 前端：React + oink-ui ----
+    "web/package.json",
+    "web/package-lock.json",
+    "web/vite.config.ts",
+    "web/tsconfig.json",
+    "web/index.html",
+    "web/src/main.tsx",
+    "web/src/App.tsx",
+    "web/src/api.ts",
+    "web/src/types.ts",
+    "web/src/app.css",
+    "web/src/components/LogPanel.tsx",
+    "web/src/components/MmfChart.tsx",
+    "web/src/components/LayerStrip.tsx",
+    "web/src/pages/OverviewPage.tsx",
+    "web/src/pages/MidpointPage.tsx",
+    "web/src/pages/StackupPage.tsx",
+    "web/src/pages/SwapPage.tsx",
+    "web/src/pages/OverwritePage.tsx",
+    "web/src/pages/SnapshotPage.tsx",
+    # ---- 旧版 tkinter 界面（保留参考）----
+    "legacy_tkinter/main.py",
+    "legacy_tkinter/gui_style.py",
+    "legacy_tkinter/gui_sidebar.py",
+    "legacy_tkinter/midpoint_tab.py",
+    "legacy_tkinter/stackup_page.py",
+    "legacy_tkinter/swap_page.py",
+    "legacy_tkinter/overwrite_page.py",
+    "legacy_tkinter/snapshot_page.py",
+    # ---- 桌面外壳（Tauri）----
+    "web/src-tauri/Cargo.toml",
+    "web/src-tauri/Cargo.lock",
+    "web/src-tauri/build.rs",
+    "web/src-tauri/tauri.conf.json",
+    "web/src-tauri/capabilities/default.json",
+    "web/src-tauri/src/lib.rs",
+    "web/src-tauri/src/main.rs",
+    "web/src-tauri/icons/icon.ico",
+    # ---- 其它 ----
     "altium_tools.ico",
     "altium_tools_config.json",
     "AltiumTools.cmd",
@@ -157,6 +203,10 @@ FILES = [
     "upload_gui.py",
 ]
 
+DESCRIPTION = ("Web UI (React + oink-ui) toolkit for Altium Designer automation: "
+               "midpoint short-line drawing, layer-stack design, layer swap and "
+               "overwrite, project snapshots -- driven through the eda-agent MCP "
+               "bridge (stdio JSON-RPC). Python stdlib backend + local browser UI.")
 DESCRIPTION = ("GUI toolkit for Altium Designer automation: midpoint short-line "
                "drawing, layer-stack design, and layer swap -- driven through "
                "the eda-agent MCP bridge (stdio JSON-RPC). Pure tkinter/ttk.")
@@ -400,11 +450,26 @@ def build_exe(log=print, specnm="AltiumTools"):
     """
     cmd = _find_build_python(log)
     exe = os.path.join(HERE, "dist", specnm + ".exe")
+
+    # 🔴 目标 exe 被占用（用户开着 GUI）时，PyInstaller 会在收尾阶段报
+    #    PermissionError: [WinError 5] 直接失败。实测最简单可靠的判据是
+    #    试着以 r+b 打开 —— 抛 PermissionError 就是被进程占用。
+    #    这时改出到带时间戳的 dist_locked_<ts>\，打包照常成功，只是路径变一下。
+    extra = []
+    if os.path.isfile(exe):
+        try:
+            open(exe, "r+b").close()
+        except PermissionError:
+            alt = os.path.join(HERE, "dist_locked_" + time.strftime("%Y%m%d_%H%M%S"))
+            exe = os.path.join(alt, specnm + ".exe")
+            extra = ["--distpath", alt]
+            log("!! dist\\%s.exe 被占用（GUI 还开着）-> 改出到 %s"
+                % (specnm, os.path.basename(alt)))
     log("打包解释器: %s" % " ".join(cmd))
     tail, last = [], "未知"
     for turn, use_clean in enumerate((True, False), start=1):
         _preclean(specnm, log)
-        argv = cmd + ["-m", "PyInstaller", specnm + ".spec", "--noconfirm"]
+        argv = cmd + ["-m", "PyInstaller", specnm + ".spec", "--noconfirm"] + extra
         if use_clean:
             argv.append("--clean")
         log("$ " + " ".join(argv) + ("   (第 %d 次)" % turn if turn > 1 else ""))
@@ -421,6 +486,17 @@ def build_exe(log=print, specnm="AltiumTools"):
                     tail.pop(0)
         pr.wait()
         if pr.returncode == 0 and os.path.isfile(exe):
+            # 走的是"占用回退"分支时，打包这十几秒里用户可能已经把 GUI 关掉了，
+            # 那就顺手把新产物复制回 dist\ —— 省得下次又对不上时间戳。best-effort。
+            if extra:
+                std = os.path.join(HERE, "dist", specnm + ".exe")
+                try:
+                    shutil.copy2(exe, std)
+                    log("   (GUI 已释放) 顺手复制回 " + os.path.relpath(std, HERE))
+                    exe = std
+                except OSError:
+                    log("   (dist 仍被占用，保留在 "
+                        + os.path.basename(os.path.dirname(exe)) + ")")
             break
         last = "退出码 %s" % pr.returncode
         log("!! 第 %d 次打包失败 (%s)" % (turn, last))
@@ -435,6 +511,46 @@ def build_exe(log=print, specnm="AltiumTools"):
     if open(exe, "rb").read(4) == b"%TSD":
         raise RuntimeError("exe 是 DLP 密文，拒绝上传（删掉 dist 目录重打一次）")
     log("exe 就绪: %s  %.1f MB" % (exe, os.path.getsize(exe) / 1048576.0))
+    return exe
+
+
+def build_desktop(log=print):
+    """用 Tauri 打桌面版安装包（NSIS），返回安装包路径。
+
+    桌面版 = web/src-tauri（Tauri v2 外壳 + React/oink-ui 前端 + Python 后端）。
+    产物：web/src-tauri/target/release/bundle/nsis/*_x64-setup.exe
+    需要：Node.js + Rust 工具链（见 README「桌面版」一节）。
+    """
+    web = os.path.join(HERE, "web")
+    if not os.path.isdir(os.path.join(web, "src-tauri")):
+        raise RuntimeError("没有 web/src-tauri 目录，无法打桌面版")
+    argv = ["cmd", "/c", "npx", "tauri", "build", "--bundles", "nsis"]
+    log("$ cd web && " + " ".join(argv))
+    tail = []
+    pr = subprocess.Popen(argv, cwd=web, env=_clean_env(),
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          text=True, errors="replace", bufsize=1)
+    for line in pr.stdout:
+        line = line.rstrip()
+        if line:
+            log("   " + line)
+            tail.append(line)
+            if len(tail) > 25:
+                tail.pop(0)
+    pr.wait()
+    bundle = os.path.join(web, "src-tauri", "target", "release", "bundle", "nsis")
+    cands = []
+    if os.path.isdir(bundle):
+        for fn in os.listdir(bundle):
+            if fn.lower().endswith("-setup.exe"):
+                cands.append(os.path.join(bundle, fn))
+    if pr.returncode != 0 or not cands:
+        raise RuntimeError("Tauri 打包失败（退出码 %s）\n%s"
+                           % (pr.returncode, "\n".join(tail[-8:])))
+    cands.sort(key=os.path.getmtime)
+    exe = cands[-1]
+    log("桌面版安装包: %s (%.1f MB)"
+        % (os.path.basename(exe), os.path.getsize(exe) / 1048576.0))
     return exe
 
 
@@ -616,10 +732,10 @@ def do_upload(token, repo_name, message="", public=True, log=print,
         exe = None
         if with_exe:
             try:
-                exe = build_exe(log=log)
+                exe = build_desktop(log=log)
             except Exception as ex:
-                problems.append("exe 打包失败：%s" % str(ex).splitlines()[0])
-                log("!! exe 打包失败，本次无附件：%s" % ex)
+                problems.append("桌面版打包失败：%s" % str(ex).splitlines()[0])
+                log("!! 桌面版打包失败，本次无附件：%s" % ex)
         rel = None
         try:
             rel = _req("POST", "%s/repos/%s/%s/releases"
@@ -649,15 +765,15 @@ def do_upload(token, repo_name, message="", public=True, log=print,
                         upload_asset(owner, repo_name, token, rel["id"], exe,
                                      log=log)
                     except Exception as ex:
-                        problems.append("exe 附件上传失败：%s" % str(ex)[:200])
-                        log("!! exe 附件上传失败：%s" % ex)
+                        problems.append("安装包附件上传失败：%s" % str(ex)[:200])
+                        log("!! 安装包附件上传失败：%s" % ex)
                 else:
-                    problems.append("exe 未打包成功，附件未上传")
+                    problems.append("桌面版未打包成功，附件未上传")
             else:
-                log("(未开启「打包 exe」，本次只发 Release、不带附件)")
+                log("(未开启「打包桌面版」，本次只发 Release、不带附件)")
     elif with_exe:
-        log("!! 勾了打包 exe 但没给 Release tag —— exe 只能作为 Release 附件上传")
-        problems.append("没有 Release tag：exe 未上传")
+        log("!! 勾了打包桌面版但没给 Release tag —— 安装包只能作为 Release 附件上传")
+        problems.append("没有 Release tag：安装包未上传")
 
     url = "https://github.com/%s/%s" % (owner, repo_name)
     log("")

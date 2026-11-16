@@ -1,0 +1,295 @@
+/* 应用级样式 —— 全部基于 oink-ui 的令牌，随明暗主题自动跟随。 */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--ok-font);
+  background: var(--ok-bg);
+  color: var(--ok-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ------------------------------------------------------------- 顶栏 */
+.appbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.appbar__title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.appbar__spacer {
+  flex: 1 1 auto;
+}
+
+/* ------------------------------------------------------------ 状态栏 */
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  color: var(--ok-text-2);
+  background: var(--ok-surface);
+  border-top: 1px solid var(--ok-line);
+}
+
+.statusbar__dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--ok-r-full);
+  background: var(--ok-accent);
+}
+
+.statusbar--error .statusbar__dot {
+  background: var(--ok-danger);
+}
+
+.statusbar__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------ 日志区 */
+.logpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.logpanel__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logpanel__count {
+  font-size: 12px;
+  color: var(--ok-text-3);
+}
+
+.log {
+  margin: 0;
+  padding: 10px 12px;
+  /* 高度随窗口联动：矮屏 160px，超宽屏最多 460px */
+  max-height: clamp(160px, 26vh, 460px);
+  overflow: auto;
+  font-family: var(--ok-font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ok-text-2);
+  background: var(--ok-well);
+  border: 1px solid var(--ok-line);
+  border-radius: var(--ok-r-2);
+}
+
+.log:empty::before {
+  content: '（暂无输出）';
+  color: var(--ok-text-3);
+}
+
+/* ------------------------------------------------------------ 页面布局 */
+/* 目标：窗口放大 → 各栏按比例变大；窗口缩小 → 优雅降级，不重叠不错位。 */
+
+.pg-grid {
+  display: grid;
+  gap: clamp(12px, 0.9vw, 20px);
+  align-items: start;
+  width: 100%;
+  min-width: 0;
+}
+
+/* 三栏：参数 | 主区（叠层序列 + MMF） | 结果 */
+.pg-grid--3 {
+  grid-template-columns:
+    minmax(230px, 0.8fr)
+    minmax(0, 2.15fr)
+    minmax(250px, 1fr);
+}
+
+/* 两栏：左操作 | 右输出 */
+.pg-grid--2 {
+  grid-template-columns: minmax(300px, 1fr) minmax(0, 1.55fr);
+}
+
+.pg-col {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(12px, 0.9vw, 20px);
+  min-width: 0;
+}
+
+/* 中等宽度：右栏掉到下一行并铺满 */
+@media (max-width: 1500px) {
+  .pg-grid--3 {
+    grid-template-columns: minmax(230px, 1.05fr) minmax(0, 1.95fr);
+  }
+  .pg-grid--3 > .pg-col--right {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1080px) {
+  .pg-grid--3,
+  .pg-grid--2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pg-grid--3 > .pg-col--right {
+    grid-column: auto;
+  }
+}
+
+.pg-col > .ok-card {
+  min-width: 0;
+}
+
+/* ------------------------------------------------ 字号随窗口温和放大 */
+/* 1200px→2200px 视口区间内约放大 10%，两端夹住，避免过宽发虚。 */
+.ok-page-header__title {
+  font-size: clamp(20px, calc(15px + 0.42vw), 28px);
+}
+
+.ok-card__title {
+  font-size: clamp(14px, calc(12.6px + 0.16vw), 17px);
+}
+
+.ok-page-header__desc {
+  font-size: clamp(13px, calc(12.2px + 0.14vw), 15px);
+}
+
+.ok-table table {
+  font-size: clamp(13px, calc(12.2px + 0.12vw), 14.5px);
+}
+
+.ok-table th {
+  font-size: clamp(11px, calc(10.4px + 0.1vw), 12.5px);
+}
+
+/* 统计卡数值：别在单位前折行（4.9600 / mm → 4.9600 mm） */
+.ok-stat__value {
+  font-size: clamp(20px, calc(13px + 0.68vw), 26px);
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+/* --------------------------------------------------------- 叠层序列表 */
+/* 表格里的 Select 起步宽 168px 太占地方，这里压到 96px */
+.layer-table {
+  font-variant-numeric: tabular-nums;
+  --ok-select-min: 96px;
+}
+
+.layer-table__name {
+  font-family: var(--ok-font-mono);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+/* 层名列：超宽时省略，不把别的列挤出可视区 */
+.layer-table td .layer-table__name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ------------------------------------------------------------ 色块条 */
+/* 横排放在层序表上方：不占表格横向空间，等分整幅宽度 */
+.strip {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  overflow: hidden;
+  border: 1px solid var(--ok-line);
+  border-radius: var(--ok-r-2);
+}
+
+.strip__item {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0 2px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  border-right: 1px solid rgb(255 255 255 / 28%);
+}
+
+.strip__item:last-child {
+  border-right: 0;
+}
+
+/* ------------------------------------------------------------ MMF 图 */
+.mmf {
+  width: 100%;
+  height: auto;
+  /* 超宽屏时别让图无限拉高 */
+  max-height: min(46vh, 520px);
+  border: 1px solid var(--ok-line);
+  border-radius: var(--ok-r-2);
+  background: var(--ok-surface);
+}
+
+.mmf__axis {
+  stroke: var(--ok-line-2);
+  stroke-width: 1;
+}
+
+.mmf__zero {
+  stroke: var(--ok-line-2);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.mmf__grid {
+  stroke: var(--ok-line);
+  stroke-width: 1;
+}
+
+.mmf__label {
+  fill: var(--ok-text-3);
+  font-size: 9px;
+}
+
+/* ------------------------------------------------------------ 其它 */
+.hint-text {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ok-text-2);
+}
+
+.mono {
+  font-family: var(--ok-font-mono);
+  font-size: 12.5px;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.stack-gap {
+  height: 4px;
+}

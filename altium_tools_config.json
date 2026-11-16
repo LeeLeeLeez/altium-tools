@@ -23,5 +23,11 @@
   "cumode": "global",
   "stk_confirmed": [],
   "swap_a": "",
-  "swap_b": ""
+  "swap_b": "",
+  "mv_force": false,
+  "snapRoot": "E:\\project\\800-6\\PCB_prj\\A4_prj",
+  "snapRoots": [
+    "E:\\project\\800-6\\PCB_prj\\A4_prj"
+  ],
+  "snapLastDst": ""
 }

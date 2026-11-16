@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AltiumTools",
+  "version": "2.0.0",
+  "identifier": "com.hachiwii.altiumtools",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../../server.py": "server.py",
+      "../../api": "api",
+      "../../web/dist": "web/dist",
+      "../../altium_bridge.py": "altium_bridge.py",
+      "../../stackup_design.py": "stackup_design.py",
+      "../../stackup_build.py": "stackup_build.py",
+      "../../stackup_file.py": "stackup_file.py",
+      "../../swap_script.py": "swap_script.py",
+      "../../overwrite_script.py": "overwrite_script.py",
+      "../../snapshot_core.py": "snapshot_core.py",
+      "../../altium_tools_config.json": "altium_tools_config.json",
+      "../../altium_tools.ico": "altium_tools.ico"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

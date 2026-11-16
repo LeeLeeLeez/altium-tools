@@ -30,7 +30,10 @@ if HERE not in sys.path:
 
 import gh_upload  # noqa: E402
 
-# ---- 风格：优先复用统一的浅色主题模块（本目录自带 gui_style.py）----
+# ---- 风格：优先复用统一的浅色主题模块（legacy_tkinter/gui_style.py）----
+_LEGACY = os.path.join(HERE, "legacy_tkinter")
+if os.path.isdir(_LEGACY) and _LEGACY not in sys.path:
+    sys.path.insert(0, _LEGACY)
 try:
     import gui_style as gs
     _P = gs.PALETTE
@@ -158,7 +161,7 @@ class Uploader(tk.Tk):
         row6 = ttk.Frame(top)
         row6.grid(row=6, column=1, columnspan=3, sticky="w", padx=(8, 0),
                   pady=(6, 0))
-        ttk.Checkbutton(row6, text="打包 exe 并作为附件上传（约 40 秒）",
+        ttk.Checkbutton(row6, text="打包桌面版安装包并作为附件上传（Tauri，约 2-4 分钟）",
                         variable=self.v_exe).pack(side="left")
         ttk.Checkbutton(row6, text="不走代理（直连）",
                         variable=self.v_noproxy).pack(side="left", padx=(18, 0))

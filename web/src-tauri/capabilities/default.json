@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Altium 工具集默认权限（仅用到 core，无需额外插件权限）",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

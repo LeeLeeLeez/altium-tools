@@ -28,6 +28,15 @@ _tmp*/
 *.token
 .env
 
+# ============ 前端（React + oink-ui）============
+node_modules/
+web/dist/
+web/node_modules/
+
+# ============ Tauri 桌面壳 ============
+web/src-tauri/target/
+web/src-tauri/gen/
+
 # ============ 编辑器 / 系统 ============
 .workbuddy/
 .vscode/

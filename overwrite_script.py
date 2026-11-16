@@ -88,6 +88,10 @@ Var
     CntA1      : Integer;
     CntB1      : Integer;
     TmpStr     : String;
+    SanityStr  : String;
+    Residual   : Integer;
+    ASeed      : String;
+    BSeed      : String;
     DelFailCount : Integer;
     KindsStr   : String;
     KindsSeen  : String;
@@ -229,6 +233,28 @@ End;
 
 { Delete the copyable primitives sitting on one layer. Repeat until empty so }
 { that the live iterator cannot hide anything by shifting under us.          }
+{ Count one KIND of copyable object on a layer. Used by the report so a    }
+{ mismatch can be told apart as 'polygons differ' vs 'regions differ' -    }
+{ a bare total hides which kind is wrong.                                  }
+Function CountKindOnLayer(L : TLayer; Oid : Integer) : Integer;
+Var
+    It : IPCB_BoardIterator;
+    P  : IPCB_Primitive;
+Begin
+    Result := 0;
+    It := Board.BoardIterator_Create;
+    It.AddFilter_ObjectSet(MkSet(Oid));
+    It.AddFilter_LayerSet(MkSet(L));
+    It.AddFilter_Method(eProcessAll);
+    P := It.FirstPCBObject;
+    While P <> Nil Do
+    Begin
+        If P.Layer = L Then Result := Result + 1;
+        P := It.NextPCBObject;
+    End;
+    Board.BoardIterator_Destroy(It);
+End;
+
 Function DeleteOnLayer(L : TLayer) : Integer;
 Var
     It     : IPCB_BoardIterator;
@@ -238,6 +264,12 @@ Var
 Begin
     Result := 0;
     Passes := 0;
+    { Removing a primitive is only honoured inside the pour/modify context, and  }
+    { the production script (PCB_DeleteObject) ALSO broadcasts BoardRegisteration }
+    { for the object right before removing it. Without both, RemovePCBObject can  }
+    { silently do nothing for some kinds - no exception, so DelFailCount stays 0, }
+    { and the leftovers look like "the copper does not match the source".        }
+    Try PCBServer.PreProcess; Except End;
     Repeat
         Any := False;
         It := Board.BoardIterator_Create;
@@ -250,6 +282,9 @@ Begin
             If P.Layer = L Then
             Begin
                 Try
+                    PCBServer.SendMessageToRobots(Board.I_ObjectAddress,
+                        c_Broadcast, PCBM_BoardRegisteration,
+                        P.I_ObjectAddress);
                     Board.RemovePCBObject(P);
                     Result := Result + 1;
                     Any := True;
@@ -273,8 +308,11 @@ Begin
         Board.BoardIterator_Destroy(It);
         Passes := Passes + 1;
     Until (Not Any) Or (Passes >= 60);
+    Try PCBServer.PostProcess; Except End;
 End;
 
+@@CLIPBOARD_FUNC@@
+@@PARAMS_STAMP@@
 { Copy every primitive of FromLayer onto ToLayer. FromLayer is untouched.    }
 Function CopyLayerInto(FromLayer, ToLayer : TLayer; Var Fail : Integer) : Integer;
 Var
@@ -297,10 +335,14 @@ Begin
       Without that pour context Rebuild pours EMPTY copper - which is how the
       layer lost all its copper on the earlier attempt. }
     Try PCBServer.PreProcess; Except End;
-    Passes := 0;
-    Repeat
-        Any := False;
-        It := Board.BoardIterator_Create;
+    { SINGLE PASS - and it must stay single pass.                                }
+    { A Repeat/Until(Not Any) loop is WRONG here: copying does NOT consume the }
+    { source objects, so the next pass sees the very same sources, Any stays   }
+    { True, and the loop runs all 60 passes - i.e. every source object gets    }
+    { copied 60 times. Measured: source 8 -> copied 480, source 14 -> 840,     }
+    { source 12 -> 720, and the target layer ballooned to 960 objects.        }
+    { The delete routine may loop (deleting converges); copying must not.     }
+    It := Board.BoardIterator_Create;
         It.AddFilter_ObjectSet(CopySet);
         It.AddFilter_LayerSet(MkSet(FromLayer));
         It.AddFilter_Method(eProcessAll);
@@ -342,12 +384,8 @@ Begin
                         Board.AddPCBObject(NewP);
                         Board.EndModify;
 
-                        { Register the new primitive right after adding it -
-                          the API notes warn that AddPCBObject alone may not
-                          register it with the editors. }
-                        PCBServer.SendMessageToRobots(Board.I_ObjectAddress,
-                            c_Broadcast, PCBM_BoardRegisteration,
-                            NewP.I_ObjectAddress);
+                        { Registration is deliberately NOT here - it moved to
+                          the end of this block, after the layer change. }
 
                         { Change the layer with exactly the ceremony the layer
                           swap page uses (that one is verified to keep the
@@ -406,8 +444,18 @@ Begin
                             End;
                         End;
 
+                        { Register the new primitive LAST - after the layer change,
+                          the net hang and (when re-pouring) the rebuild.
+                          Registering it while the copy still sat on the SOURCE
+                          layer made the editor index it on that layer, so the
+                          copied copper could not be picked on the target layer.
+                          The production script (PCB_Scale) registers after the
+                          modification for the same reason. }
+                        PCBServer.SendMessageToRobots(Board.I_ObjectAddress,
+                            c_Broadcast, PCBM_BoardRegisteration,
+                            NewP.I_ObjectAddress);
+
                         Result := Result + 1;
-                        Any := True;
                     Except
                         Fail := Fail + 1;
                     End;
@@ -416,8 +464,6 @@ Begin
             P := It.NextPCBObject;
         End;
         Board.BoardIterator_Destroy(It);
-        Passes := Passes + 1;
-    Until (Not Any) Or (Passes >= 60);
 
     Try PCBServer.PostProcess; Except End;
 
@@ -540,13 +586,32 @@ Begin
     ShowMessage(TmpStr);
 
     Deleted := DeleteOnLayer(LayerA);
-    Copied  := CopyLayerInto(LayerB, LayerA, Failed);
+    { DeleteOnLayer returns what it BELIEVES it removed. RemovePCBObject  }
+    { can silently refuse an object (no exception, so DelFailCount stays  }
+    { 0) - re-count to catch that, otherwise the leftovers show up as     }
+    { 'the copper does not match the source' on a partial area.           }
+    Residual := CountOnLayer(LayerA);
+    Copied  := @@COPY_CALL@@;
 
     CntA1 := CountOnLayer(LayerA);
+    ASeed := 'poly=' + IntToStr(CountKindOnLayer(LayerA, ePolyObject))
+        + ' region=' + IntToStr(CountKindOnLayer(LayerA, eRegionObject));
+    BSeed := 'poly=' + IntToStr(CountKindOnLayer(LayerB, ePolyObject))
+        + ' region=' + IntToStr(CountKindOnLayer(LayerB, eRegionObject));
     CntB1 := CountOnLayer(LayerB);
 
     Try Board.ViewManager_FullUpdate; Except End;
+    Try Board.GraphicallyInvalidate; Except End;
     Try PCBServer.PostProcess; Except End;
+
+    { Sanity: with a single pass, the number copied must equal the number of   }
+    { copyable objects on the source layer. A mismatch means the copy ran more  }
+    { than once and the target layer now holds DUPLICATES. The report has to    }
+    { say so by itself - this went unnoticed once and cost 60x duplication.    }
+    SanityStr := 'OK';
+    If Copied <> CntB0 Then
+        SanityStr := '!! MISMATCH - copied should equal the source count;'
+            + ' the target layer may now hold DUPLICATES';
 
     { CommaText, Count and Get on TStringList ALL turned out not to exist in
       this DelphiScript build (the compiler flagged CommaText first, then
@@ -558,6 +623,7 @@ Begin
               #13#10 + '(Closing the document without saving = the change is lost.)' +
               #13#10 + #13#10 +
               'Overwrite finished.' + #13#10 + @@REPOUR_REPORT_LINE@@
+              'copy mode     : @@COPY_MODE@@' + #13#10 +
               '------------------------------------------------' + #13#10 +
               'erased on A : ' + IntToStr(Deleted) + #13#10 +
               'copied B->A : ' + IntToStr(Copied) +
@@ -569,6 +635,11 @@ Begin
               '------------------------------------------------' + #13#10 +
               'delete failures: ' + IntToStr(DelFailCount) +
               '  (kinds: ' + KindsStr + ')' + #13#10 +
+              'residual after delete on A : ' + IntToStr(Residual) + #13#10 +
+              'kind on A     : ' + ASeed + #13#10 +
+              'kind on B     : ' + BSeed + #13#10 +
+              'sanity        : copied ' + IntToStr(Copied) + ' vs source '
+              + IntToStr(CntB0) + '  -> ' + SanityStr + #13#10 +
               'expected: A -> ' + IntToStr(CntB0) +
               ' , B unchanged at ' + IntToStr(CntB0) + #13#10 + #13#10 +
               'Ctrl+S to keep, Ctrl+Z to undo.' + #13#10 + #13#10 +
@@ -580,12 +651,108 @@ Begin
 End;
 '''
 
+_CLIPBOARD_FUNC = r"""
+{ CopyLayerIntoClipboard - let AD's OWN Copy/Paste carry the copy.            }
+{                                                                             }
+{ Why this exists: Prim.Replicate copies a polygon's OUTLINE only. The pour is }
+{ internal data the script API cannot reach, so a replicated polygon arrives   }
+{ UNPOURED, and AD then pours it from the TARGET layer's own connect-style      }
+{ rules - which is why the relief came back as "direct" even with re-pour off.  }
+{ AD's own copy carries the pour, exactly like a manual copy/paste does.        }
+{                                                                             }
+{ Selection is built by writing Prim.Selected := True. The production script    }
+{ documents that this is the only way a PROGRAMMATIC selection is seen -        }
+{ Board.SelectecObject[] lists only editor-made picks.                         }
+{                                                                             }
+{ SAFETY: if the current layer cannot be switched to ToLayer we do NOT paste.   }
+{ Pasting onto the wrong current layer would duplicate the source layer.        }
+{-----------------------------------------------------------------------------}
+Function CopyLayerIntoClipboard(FromLayer, ToLayer : TLayer; Var Fail : Integer) : Integer;
+Var
+    It       : IPCB_BoardIterator;
+    P        : IPCB_Primitive;
+    Prim     : IPCB_Primitive;
+    SelList  : TInterfaceList;
+    I, N     : Integer;
+    Cur      : TLayer;
+    Switched : Boolean;
+Begin
+    Result := 0;
+    Fail := 0;
+    SelList := CreateObject(TInterfaceList);
+    Try
+        { 1) collect FIRST, then write .Selected. Never mutate while the board }
+        {    iterator is walking - that corrupts the iterator and hangs.      }
+        It := Board.BoardIterator_Create;
+        It.AddFilter_ObjectSet(CopySet);
+        It.AddFilter_LayerSet(AllLayers);
+        It.AddFilter_Method(eProcessAll);
+        P := It.FirstPCBObject;
+        While P <> Nil Do
+        Begin
+            Try
+                If P.Layer = FromLayer Then SelList.Add(P);
+            Except End;
+            P := It.NextPCBObject;
+        End;
+        Board.BoardIterator_Destroy(It);
+
+        N := SelList.Count;
+        If N = 0 Then Exit;
+
+        Try PCBServer.PreProcess; Except End;
+
+        For I := 0 To N - 1 Do
+        Begin
+            Prim := SelList.Items[I];
+            Try Prim.Selected := True; Except End;
+        End;
+
+        { 2) let AD do the copy (this is the step that carries the pour) }
+        Try RunProcess('PCB:Copy'); Except End;
+
+        { 3) switch the current layer, then VERIFY before pasting }
+        Switched := False;
+        Try Board.CurrentLayer := ToLayer; Except End;
+        Cur := eNoLayer;
+        Try Cur := Board.CurrentLayer; Except End;
+        If Cur = ToLayer Then Switched := True;
+
+        If Switched Then
+        Begin
+            Try RunProcess('PCB:PasteOnCurrentLayer'); Except End;
+            Result := N;
+        End
+        Else
+        Begin
+            Fail := N;
+            Try
+                ShowMessage('Current layer could not be switched - the paste was '
+                    + 'SKIPPED on purpose, because pasting onto the wrong current '
+                    + 'layer would duplicate the source layer. Nothing was copied.');
+            Except End;
+        End;
+
+        Try PCBServer.PostProcess; Except End;
+
+        { 4) clear the selection we made (pasted copies stay selected) }
+        For I := 0 To N - 1 Do
+        Begin
+            Prim := SelList.Items[I];
+            Try Prim.Selected := False; Except End;
+        End;
+    Finally
+        Try SelList.Free; Except End;
+    End;
+End;
+"""
+
 PRJ = ("[Design]\r\nVersion=1.0\r\nHierarchyMode=0\r\n\r\n"
        "[Document1]\r\nDocumentPath=@@PASNAME@@\r\n")
 
 
 def build_pas(name_a: str, name_b: str, stem: str = "",
-              repour: bool = False) -> str:
+              repour: bool = False, copy_mode: str = "api") -> str:
     """生成 .pas 正文（纯 ASCII，CRLF 由调用方负责）。"""
     a, b = validate_pair(name_a, name_b)
 
@@ -607,13 +774,31 @@ def build_pas(name_a: str, name_b: str, stem: str = "",
         report_line = "'repour        : OFF (copied copper kept as-is)' + #13#10 +"
         mode = "NO-REPOUR"
 
+    cm = (copy_mode or "api").strip().lower()
+    if cm not in ("api", "clipboard"):
+        raise LayerPickError("copy_mode 只能是 api / clipboard，收到 %r" % copy_mode)
+    if cm == "clipboard":
+        copy_func = _CLIPBOARD_FUNC
+        copy_call = "CopyLayerIntoClipboard(LayerB, LayerA, Failed)"
+        copy_note = "CLIPBOARD (AD Copy/Paste - the pour travels with the copy)"
+    else:
+        copy_func = ("{ clipboard copy mode not selected - the API copy below is used. }\n"
+                     "{ Ask for it with copy_mode='clipboard' in the generator.      }")
+        copy_call = "CopyLayerInto(LayerB, LayerA, Failed)"
+        copy_note = "API (Replicate = outline only; AD pours polygons itself)"
+
     out = _TEMPLATE
     for tok, val in (("@@NAME_A@@", a), ("@@NAME_B@@", b),
                      ("@@STEM@@", stem or STEM_PREFIX),
                      ("@@REBUILD_CALL@@", rebuild_call),
                      ("@@ANALYZE_CALL@@", analyze_call),
                      ("@@REPOUR_REPORT_LINE@@", report_line),
-                     ("@@REPOUR_MODE@@", mode)):
+                     ("@@REPOUR_MODE@@", mode),
+                     ("@@CLIPBOARD_FUNC@@", copy_func),
+                     ("@@COPY_CALL@@", copy_call),
+                     ("@@COPY_MODE@@", copy_note),
+                     ("@@PARAMS_STAMP@@",
+                      "{ OW_PARAMS repour=%d copy=%s }" % (1 if repour else 0, cm))):
         out = out.replace(tok, val)
     if "@@" in out:
         raise LayerPickError("模板里还有未替换的占位符: "
@@ -666,14 +851,16 @@ def prune_old(out_dir: str, keep_sets: int = 0, keep_baks: int = 0,
 
 
 def write_script(out_dir: str, name_a: str, name_b: str,
-                 stem: str = "", repour: bool = False) -> tuple[str, str]:
+                 stem: str = "", repour: bool = False,
+                 copy_mode: str = "api") -> tuple[str, str]:
     """生成 <stem>.pas + <stem>.PrjScr，返回两个路径。"""
     os.makedirs(out_dir, exist_ok=True)
     if not stem:
         stem = default_stem()
     pas = os.path.join(out_dir, stem + ".pas")
     prj = os.path.join(out_dir, stem + ".PrjScr")
-    body = build_pas(name_a, name_b, stem=stem, repour=repour)
+    body = build_pas(name_a, name_b, stem=stem, repour=repour,
+                     copy_mode=copy_mode)
     body = body.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
     with open(pas, "wb") as f:
         f.write(body.encode("ascii"))
@@ -688,11 +875,12 @@ if __name__ == "__main__":
     a = sys.argv[1] if len(sys.argv) > 1 else "L5_P"
     b = sys.argv[2] if len(sys.argv) > 2 else "L7_B"
     rp = (len(sys.argv) > 3 and sys.argv[3].lower() in ("1", "on", "true", "repour"))
+    cm = sys.argv[4] if len(sys.argv) > 4 else "api"
     _HERE = os.path.dirname(os.path.abspath(__file__))
     # 与 overwrite_page.py 的 SCRIPT_DIR 算法保持一致（仓库根/scripts/altium_swap）。
     # 原来写 here/altium_swap，会落到 gui/altium_tools/altium_swap —— 与 GUI 路径不一致。
     out = os.path.join(os.path.dirname(os.path.dirname(_HERE)),
                        "scripts", "altium_swap")
-    p1, p2 = write_script(out, a, b, repour=rp)
+    p1, p2 = write_script(out, a, b, repour=rp, copy_mode=cm)
     print("written:", p1)
     print("written:", p2)
