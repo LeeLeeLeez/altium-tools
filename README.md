@@ -21,6 +21,10 @@
 | PCB 操作 | **叠层设计** | 叠层参数计算与生成（层序表 / MMF 图 / 计算结果 / 写出 .stackup） |
 | PCB 操作 | **层交换** | 层名重排/交换（层名取自「叠层设计」确认后的结果） |
 | PCB 操作 | **叠层覆盖** | 清空 A 层 → 把 B 层内容复制到 A（B 保留） |
+| PCB 操作 | **磁芯挖槽** | 选中 TopOverlay 闭合线 → 全板相似图形 → board cutout 增删 |
+| PCB 操作 | **铺铜挖空** | 选中铺铜 + Polygon Cutout → 合并进铺铜轮廓端点 |
+| PCB 操作 | **绕组矩阵绘制** | 选左右 MOS → 识别绕组范围 → 按层映射复制 |
+| 原理图操作 | **port父子图同步** | 扫描调用结构 → 选子图 → 父图 entry 增删 |
 | 工程管理 | **工程快照** | 日期目录 → 时间戳目录 → 拷工程本体 |
 
 ## 环境要求
@@ -188,6 +192,11 @@ altium_tools/
 | GET | `/api/health` | 健康检查 + 桥接状态 |
 | GET/PUT | `/api/config` | 配置读写（读-合并-写） |
 | GET | `/api/bridge/status` | AD 桥接状态 |
+| POST | `/api/bridge/connect` | 显式连接 / 重新连接 Altium |
+| POST | `/api/coreslot/scan` · `/create` · `/delete` | 搜寻相似闭合线 / 增加 / 删除 board cutout |
+| POST | `/api/pourcut/scan` · `/apply` | 检查铺铜+cutout / 合并挖空到铺铜轮廓 |
+| POST | `/api/winding/scan` · `/apply` | 识别绕组范围与复制计划 / 执行复制 |
+| POST | `/api/schport/scan` · `/sync` | 扫描父子图 / 按子图 port 同步父图 entry |
 | GET | `/api/pcb/stackup` | 读当前 PCB 的铜层 |
 | GET | `/api/midpoint/meta` | 长度预设 / 层名候选 / 文案 |
 | POST | `/api/midpoint/read` · `/api/midpoint/draw` | 读取选中对象 / 在中点画线 |

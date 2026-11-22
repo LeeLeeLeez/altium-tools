@@ -49,8 +49,10 @@ import time
 from dataclasses import dataclass, field
 
 # ------------------------------------------------------------------ 配置
-EDA_AGENT_EXE = r"E:\AI_model\eda-agent\.venv\Scripts\eda-agent.exe"
-EDA_AGENT_ARGS = ["--no-dashboard", "serve"]
+# 0.8.1 才提供 pcb_get_copper（整板/选中几何）和多边形 pcb_place_region，
+# 磁芯挖槽依赖这两个能力。
+EDA_AGENT_EXE = r"E:\AI_model\eda-agent-0.8.1\.venv\Scripts\python.exe"
+EDA_AGENT_ARGS = ["-m", "eda_agent", "--headless"]
 
 # Windows: 不让子进程弹控制台窗口。eda-agent.exe 是控制台程序，从 pythonw.exe
 # （无控制台）启动它时系统会自动新建控制台窗口。CREATE_NO_WINDOW 抑制该行为。
@@ -162,7 +164,30 @@ class MCPClient:
     # -- 工具调用 -----------------------------------------------------
     def tool(self, name: str, arguments: dict) -> dict:
         """调用一个 MCP 工具，并把 text content 解析成 dict 返回。"""
-        res = self.call("tools/call", {"name": name, "arguments": arguments})
+        import time as _time
+        log = r"e:/AI_model/800_6_VPDB/gui/altium_tools/bridge_calls.log"
+        t0 = _time.time()
+        try:
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(f"{_time.strftime('%H:%M:%S')} START {name}\n")
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            res = self.call("tools/call", {"name": name, "arguments": arguments})
+        except Exception as exc:  # noqa: BLE001
+            try:
+                with open(log, "a", encoding="utf-8") as f:
+                    f.write(f"{_time.strftime('%H:%M:%S')} FAIL {name} "
+                            f"{_time.time() - t0:.1f}s {exc}\n")
+            except Exception:  # noqa: BLE001
+                pass
+            raise
+        try:
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(f"{_time.strftime('%H:%M:%S')} DONE {name} "
+                        f"{_time.time() - t0:.1f}s\n")
+        except Exception:  # noqa: BLE001
+            pass
         parts: list[str] = []
         if isinstance(res, dict):
             for item in res.get("content", []):

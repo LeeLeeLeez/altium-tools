@@ -192,6 +192,20 @@ export default function SnapshotPage({ setStatus, setStatusError }: PageProps) {
   }
 
   const openBrowse = async () => {
+    // 优先用 Windows 原生目录对话框（由后端 tkinter 弹出资源管理器）
+    try {
+      const r = await api.post<{ ok: boolean; path: string; canceled: boolean }>(
+        '/api/dialog/folder',
+        { dir: root || browsePath || '', title: '选择快照库根目录' },
+      )
+      if (r.canceled || !r.path) return
+      setRoot(r.path)
+      saveConfig(r.path)
+      setStatus('已选择快照库目录')
+      return
+    } catch (e) {
+      setLog((l) => [...l, `⚠️ 系统文件对话框不可用，改用内置浏览：${errText(e)}`])
+    }
     setBrowseOpen(true)
     await onBrowse(browsePath || root || 'E:\\')
   }
@@ -320,7 +334,7 @@ export default function SnapshotPage({ setStatus, setStatusError }: PageProps) {
         open={browseOpen}
         onOpenChange={setBrowseOpen}
         title="选择快照库根目录"
-        description="在服务器上浏览目录（浏览器选不到本机路径）"
+        description="在服务器上浏览目录（仅当系统文件对话框不可用时使用）"
         size="lg"
       >
         <div className="pg-col" style={{ gap: 8 }}>

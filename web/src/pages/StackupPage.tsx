@@ -178,6 +178,18 @@ export default function StackupPage({ setStatus, setStatusError }: PageProps) {
   }
 
   const onOpenTemplates = async () => {
+    // 优先用 Windows 原生「打开文件」对话框
+    try {
+      const r = await api.post<{ ok: boolean; path: string; canceled: boolean }>(
+        '/api/dialog/file',
+        { kind: 'stackup' },
+      )
+      if (r.canceled || !r.path) return
+      await onPickTemplate(r.path)
+      return
+    } catch (e) {
+      setLog((l) => [...l, `⚠️ 系统文件对话框不可用，改用内置列表：${errText(e)}`])
+    }
     setTplOpen(true)
     try {
       const r = await api.get<{ files: typeof tplFiles; error?: string }>(
@@ -592,7 +604,7 @@ export default function StackupPage({ setStatus, setStatusError }: PageProps) {
         open={tplOpen}
         onOpenChange={setTplOpen}
         title="选择叠层模板"
-        description="AD 导出的 .stackup 文件"
+        description="AD 导出的 .stackup 文件（仅当系统文件对话框不可用时使用）"
         size="lg"
       >
         <div className="pg-col" style={{ gap: 8 }}>

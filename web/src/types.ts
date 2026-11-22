@@ -180,3 +180,196 @@ export interface SnapshotPlan {
   human: string
   prjpcb: string | null
 }
+
+
+/* ------------------------------------------------------------ 磁芯挖槽 */
+export interface CoreSlotRow {
+  id: number
+  center: [number, number]
+  size: [number, number]
+  edges: number
+  closed: boolean
+  has_cutout: boolean
+  cutout_name: string
+}
+
+export interface CoreSlotScan {
+  ok: boolean
+  doc: string
+  sample: { center: [number, number]; size: [number, number]; edges: number }
+  rows: CoreSlotRow[]
+  summary: { total: number; existing: number; missing: number }
+  lines: string[]
+}
+
+export interface CoreSlotAction {
+  ok: boolean
+  created?: number
+  deleted?: number
+  skipped?: number
+  missing?: number
+  failed?: number
+  rows: CoreSlotRow[]
+  summary: { total: number; existing: number; missing: number }
+  lines: string[]
+}
+
+
+/* ------------------------------------------------------------ 铺铜挖空 */
+export interface PourCutInfo {
+  ok: boolean
+  pour: { name: string; layer: string; net: string; vertices: number; bbox_mm: number[] }
+  cutouts: { points: number; bbox_mm: number[] }[]
+  merged_vertices: number | null
+  lines?: string[]
+}
+
+export interface PourCutApply {
+  ok: boolean
+  pour: string
+  vertices: number
+  lines: string[]
+}
+
+
+/* ------------------------------------------------------------ 绕组矩阵绘制 */
+export interface WindingDest {
+  layer: string
+  label: string
+  tag: string
+}
+
+export interface WindingMapping {
+  source: string
+  source_label: string
+  destinations: WindingDest[]
+}
+
+export interface WindingElement {
+  type: string
+  name: string
+  layer: string
+  layer_label: string
+  net: string
+  bbox_mm: number[]
+}
+
+export interface WindingScan {
+  ok: boolean
+  token: string
+  left: { designator: string; layer: string }
+  right: { designator: string; layer: string }
+  range_mm: number[]
+  bottom_line_y: number
+  top_line_y: number
+  mapping: WindingMapping[]
+  copy_count: number
+  layers: { layer: string; layer_label: string; count: number }[]
+  elements: WindingElement[]
+  lines?: string[]
+}
+
+export interface WindingApply {
+  ok: boolean
+  created_polygons: number
+  created_fills: number
+  skipped: number
+  failed: number
+  lines: string[]
+}
+
+
+export interface WindingDelete {
+  ok: boolean
+  deleted: {
+    layer: string
+    layer_label: string
+    polygons: number
+    fills: number
+    vias: number
+  }[]
+  lines: string[]
+}
+
+
+export interface WindingMirror {
+  ok: boolean
+  axis: string
+  axis_value: number
+  net_pairs: number
+  created_polygons: number
+  created_fills: number
+  created_vias: number
+  synced_nets: number
+  skipped: number
+  failed: number
+  lines: string[]
+}
+
+
+/* ------------------------------------------------------------ port 父子图同步 */
+export interface PortSheet {
+  file_path: string
+  file_name: string
+  ports: { name: string; io_type: string }[]
+  parents: { file_path: string; file_name: string; sheet_symbol: string }[]
+  port_count: number
+  parent_count: number
+}
+
+export interface PortScan {
+  ok: boolean
+  project_path: string
+  sheets: PortSheet[]
+  lines?: string[]
+}
+
+export interface PortSync {
+  ok: boolean
+  child: string
+  added: number
+  deleted: number
+  lines: string[]
+}
+
+
+/* ------------------------------------------------------------ entry 批量连线 */
+export interface EntryInfo {
+  name: string
+  side: string
+  x: number
+  y: number
+}
+
+export interface SymbolInfo {
+  sheet_name: string
+  file_name: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  entries: EntryInfo[]
+}
+
+export interface EntrySheet {
+  file_path: string
+  file_name: string
+  parents: string[]
+  symbols: SymbolInfo[]
+}
+
+export interface EntryScan {
+  ok: boolean
+  project_path: string
+  sheets: EntrySheet[]
+  lines?: string[]
+}
+
+export interface EntryApply {
+  ok: boolean
+  added_wires: number
+  added_labels: number
+  deleted_wires: number
+  deleted_labels: number
+  lines: string[]
+}

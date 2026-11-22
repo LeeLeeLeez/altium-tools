@@ -13,12 +13,17 @@ import {
   useOink,
 } from 'oink-ui'
 
-import OverviewPage from './pages/OverviewPage'
 import MidpointPage from './pages/MidpointPage'
 import StackupPage from './pages/StackupPage'
 import SwapPage from './pages/SwapPage'
 import OverwritePage from './pages/OverwritePage'
 import SnapshotPage from './pages/SnapshotPage'
+import CoreSlotPage from './pages/CoreSlotPage'
+import PourCutPage from './pages/PourCutPage'
+import WindingPage from './pages/WindingPage'
+import PortSyncPage from './pages/PortSyncPage'
+import EntryWirePage from './pages/EntryWirePage'
+import { api, errText } from './api'
 
 type IconName = React.ComponentProps<typeof Icon>['name']
 
@@ -29,8 +34,15 @@ interface NavDef {
 
 const NAV: NavDef[] = [
   {
+    group: '工程管理',
+    items: [{ id: 'snapshot', text: '工程快照', icon: 'archive' }],
+  },
+  {
     group: '原理图操作',
-    items: [{ id: 'overview', text: '概览', icon: 'file' }],
+    items: [
+      { id: 'portsync', text: 'port父子图同步', icon: 'file' },
+      { id: 'entrywire', text: 'entry批量连线', icon: 'grid' },
+    ],
   },
   {
     group: 'PCB 操作',
@@ -39,11 +51,10 @@ const NAV: NavDef[] = [
       { id: 'stackup', text: '叠层设计', icon: 'layout' },
       { id: 'swap', text: '层交换', icon: 'shuffle' },
       { id: 'overwrite', text: '叠层覆盖', icon: 'copy' },
+      { id: 'coreslot', text: '磁芯挖槽', icon: 'archive' },
+      { id: 'pourcut', text: '铺铜挖空', icon: 'layout' },
+      { id: 'winding', text: '绕组矩阵绘制', icon: 'grid' },
     ],
-  },
-  {
-    group: '工程管理',
-    items: [{ id: 'snapshot', text: '工程快照', icon: 'archive' }],
   },
 ]
 
@@ -76,6 +87,7 @@ function Shell() {
   const [status, setStatus] = useState('就绪')
   const [statusError, setStatusError] = useState(false)
   const [bridge, setBridge] = useState<{ connected: boolean }>({ connected: false })
+  const [connecting, setConnecting] = useState(false)
   const { resolvedTheme, setTheme } = useOink()
 
   const setStatusSafe = useCallback((msg: string) => {
@@ -120,6 +132,27 @@ function Shell() {
           <Badge tone={bridge.connected ? 'success' : 'neutral'} variant="soft">
             {bridge.connected ? 'AD 桥接已连接' : 'AD 桥接未连接'}
           </Badge>
+          <Button
+            size="sm"
+            variant={bridge.connected ? 'soft' : 'accent'}
+            loading={connecting}
+            onClick={async () => {
+              setConnecting(true)
+              try {
+                const r = await api.post<{ status: { connected: boolean } }>(
+                  '/api/bridge/connect',
+                )
+                setBridge(r.status)
+                setStatusSafe(r.status.connected ? '已连接 Altium' : 'Altium 未响应')
+              } catch (e) {
+                setStatusErrorSafe(errText(e))
+              } finally {
+                setConnecting(false)
+              }
+            }}
+          >
+            {bridge.connected ? '重新连接' : '连接 Altium'}
+          </Button>
           <span className="appbar__spacer" />
           <Button
             size="sm"
@@ -152,9 +185,6 @@ function Shell() {
       </AppShell.Sidebar>
 
       <AppShell.Main>
-        <div style={{ display: page === 'overview' ? 'block' : 'none' }}>
-          <OverviewPage {...shared} active={page === 'overview'} />
-        </div>
         <div style={{ display: page === 'midpoint' ? 'block' : 'none' }}>
           <MidpointPage {...shared} active={page === 'midpoint'} />
         </div>
@@ -166,6 +196,21 @@ function Shell() {
         </div>
         <div style={{ display: page === 'overwrite' ? 'block' : 'none' }}>
           <OverwritePage {...shared} active={page === 'overwrite'} />
+        </div>
+        <div style={{ display: page === 'entrywire' ? 'block' : 'none' }}>
+          <EntryWirePage {...shared} active={page === 'entrywire'} />
+        </div>
+        <div style={{ display: page === 'portsync' ? 'block' : 'none' }}>
+          <PortSyncPage {...shared} active={page === 'portsync'} />
+        </div>
+        <div style={{ display: page === 'winding' ? 'block' : 'none' }}>
+          <WindingPage {...shared} active={page === 'winding'} />
+        </div>
+        <div style={{ display: page === 'pourcut' ? 'block' : 'none' }}>
+          <PourCutPage {...shared} active={page === 'pourcut'} />
+        </div>
+        <div style={{ display: page === 'coreslot' ? 'block' : 'none' }}>
+          <CoreSlotPage {...shared} active={page === 'coreslot'} />
         </div>
         <div style={{ display: page === 'snapshot' ? 'block' : 'none' }}>
           <SnapshotPage {...shared} active={page === 'snapshot'} />

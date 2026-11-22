@@ -33,12 +33,18 @@ import altium_bridge as ab            # noqa: E402
 from api import (                    # noqa: E402
     bridge_service,
     config_store,
+    dialog_service,
     midpoint_service,
     overwrite_service,
     paths,
     snapshot_service,
     stackup_service,
     swap_service,
+    coreslot_service,
+    pourcut_service,
+    winding_service,
+    schport_service,
+    schwire_service,
 )
 
 DEFAULT_PORT = 8765
@@ -79,6 +85,82 @@ def _h_bridge_status(h, q, body):
 def _h_bridge_close(h, q, body):
     bridge_service.close()
     return {"ok": True, "status": bridge_service.status()}
+
+
+def _h_bridge_connect(h, q, body):
+    return {"ok": True, "status": bridge_service.connect()}
+
+
+def _h_coreslot_scan(h, q, body):
+    return coreslot_service.scan()
+
+
+def _h_coreslot_create(h, q, body):
+    return coreslot_service.create((body or {}).get("ids") or [])
+
+
+def _h_coreslot_delete(h, q, body):
+    return coreslot_service.delete((body or {}).get("ids") or [])
+
+
+def _h_pourcut_scan(h, q, body):
+    return pourcut_service.scan()
+
+
+def _h_pourcut_apply(h, q, body):
+    return pourcut_service.apply()
+
+
+def _h_schwire_scan(h, q, body):
+    return schwire_service.scan()
+
+
+def _h_schwire_apply(h, q, body):
+    return schwire_service.apply(str((body or {}).get("action") or "add"),
+                                (body or {}).get("items") or [])
+
+
+def _h_schport_scan(h, q, body):
+    return schport_service.scan()
+
+
+def _h_schport_sync(h, q, body):
+    return schport_service.sync(str((body or {}).get("child_path") or ""))
+
+
+def _h_winding_scan(h, q, body):
+    return winding_service.scan(bool((body or {}).get("include_vias")))
+
+
+def _h_winding_apply(h, q, body):
+    return winding_service.apply((body or {}).get("token") or "")
+
+
+def _h_winding_mirror(h, q, body):
+    return winding_service.mirror_copy(
+        (body or {}).get("token") or "",
+        bool((body or {}).get("exclude_top_bot")))
+
+
+def _h_winding_read_axis(h, q, body):
+    return winding_service.read_axis()
+
+
+def _h_winding_read_shift(h, q, body):
+    return winding_service.read_shift()
+
+
+def _h_winding_operate(h, q, body):
+    return winding_service.operate((body or {}).get("token") or "")
+
+
+def _h_winding_translate(h, q, body):
+    return winding_service.translate_copy((body or {}).get("token") or "")
+
+
+def _h_winding_delete(h, q, body):
+    return winding_service.delete((body or {}).get("layers") or [],
+                                  (body or {}).get("token") or "")
 
 
 def _h_pcb_stackup(h, q, body):
@@ -233,6 +315,29 @@ def _h_snapshot_reveal(h, q, body):
     return snapshot_service.reveal(str((body or {}).get("path") or ""))
 
 
+def _h_dialog_folder(h, q, body):
+    body = body or {}
+    initial = str(body.get("dir") or (q.get("dir") or [""])[0] or "")
+    return dialog_service.ask_folder(
+        title=str(body.get("title") or "选择文件夹"),
+        initialdir=initial,
+    )
+
+
+def _h_dialog_file(h, q, body):
+    body = body or {}
+    kind = str(body.get("kind") or "stackup")
+    initial = str(body.get("dir") or "")
+    if kind == "stackup":
+        title = "选择叠层模板（.stackup）"
+        initial = initial or paths.stackup_dir()
+        patterns = [("叠层文件", "*.stackup"), ("所有文件", "*.*")]
+    else:
+        title = str(body.get("title") or "选择文件")
+        patterns = None
+    return dialog_service.ask_open(title=title, initialdir=initial, patterns=patterns)
+
+
 ROUTES = {
     ("GET", "/api/health"): _h_health,
     ("POST", "/api/debug"): _h_debug,
@@ -240,6 +345,24 @@ ROUTES = {
     ("PUT", "/api/config"): _h_config_put,
     ("GET", "/api/bridge/status"): _h_bridge_status,
     ("POST", "/api/bridge/close"): _h_bridge_close,
+    ("POST", "/api/bridge/connect"): _h_bridge_connect,
+    ("POST", "/api/coreslot/scan"): _h_coreslot_scan,
+    ("POST", "/api/coreslot/create"): _h_coreslot_create,
+    ("POST", "/api/coreslot/delete"): _h_coreslot_delete,
+    ("POST", "/api/pourcut/scan"): _h_pourcut_scan,
+    ("POST", "/api/pourcut/apply"): _h_pourcut_apply,
+    ("POST", "/api/schwire/scan"): _h_schwire_scan,
+    ("POST", "/api/schwire/apply"): _h_schwire_apply,
+    ("POST", "/api/schport/scan"): _h_schport_scan,
+    ("POST", "/api/schport/sync"): _h_schport_sync,
+    ("POST", "/api/winding/scan"): _h_winding_scan,
+    ("POST", "/api/winding/apply"): _h_winding_apply,
+    ("POST", "/api/winding/mirror"): _h_winding_mirror,
+    ("POST", "/api/winding/translate"): _h_winding_translate,
+    ("POST", "/api/winding/read_axis"): _h_winding_read_axis,
+    ("POST", "/api/winding/read_shift"): _h_winding_read_shift,
+    ("POST", "/api/winding/operate"): _h_winding_operate,
+    ("POST", "/api/winding/delete"): _h_winding_delete,
     ("GET", "/api/pcb/stackup"): _h_pcb_stackup,
     ("GET", "/api/midpoint/meta"): _h_midpoint_meta,
     ("POST", "/api/midpoint/read"): _h_midpoint_read,
@@ -269,6 +392,8 @@ ROUTES = {
     ("POST", "/api/snapshot/create"): _h_snapshot_create,
     ("GET", "/api/snapshot/browse"): _h_snapshot_browse,
     ("POST", "/api/snapshot/reveal"): _h_snapshot_reveal,
+    ("POST", "/api/dialog/folder"): _h_dialog_folder,
+    ("POST", "/api/dialog/file"): _h_dialog_file,
 }
 
 # ==================================================================== 服务
@@ -442,6 +567,12 @@ def main(argv=None) -> int:
     else:
         print("  关闭：在本窗口按 Ctrl+C")
     print("=" * 58)
+
+    # 原生文件对话框（tkinter 专用线程）——浏览器拿不到本机路径时由后端弹窗
+    try:
+        dialog_service.start()
+    except Exception as exc:  # noqa: BLE001
+        print(f"  （文件对话框未就绪：{exc}）")
 
     if not args.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()

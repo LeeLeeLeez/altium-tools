@@ -21,12 +21,19 @@ def get_bridge() -> "ab.AltiumBridge":
     with _lock:
         if _bridge is None:
             try:
-                _bridge = ab.AltiumBridge()
+                _bridge = ab.AltiumBridge(timeout=600.0)
                 _error = None
             except Exception as e:  # noqa: BLE001
                 _error = f"{type(e).__name__}: {e}"
                 raise
         return _bridge
+
+
+def connect() -> dict:
+    """显式连接（顶栏「连接 Altium」）：先关旧进程，再重新拉起并握手。"""
+    close()
+    get_bridge()
+    return status()
 
 
 def status() -> dict:

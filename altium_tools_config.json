@@ -2,7 +2,7 @@
   "mv_start": "9415",
   "mv_len": "39",
   "mv_width": "4",
-  "mv_layer": "Mechanical2",
+  "mv_layer": "",
   "mh_start": "222",
   "mh_len": "40",
   "mh_width": "4",
@@ -29,5 +29,8 @@
   "snapRoots": [
     "E:\\project\\800-6\\PCB_prj\\A4_prj"
   ],
-  "snapLastDst": ""
+  "snapLastDst": "E:\\project\\800-6\\PCB_prj\\A4_prj\\20261120\\2026_1120_092056",
+  "snap_last_dst": "E:\\project\\800-6\\PCB_prj\\A4_prj\\20261122\\2026_1122_120724",
+  "ow_a": "top",
+  "ow_b": "L1_B"
 }
